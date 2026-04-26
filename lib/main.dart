@@ -30,7 +30,7 @@ class FurnitureAppState extends State<FurnitureApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'معرض الأثاث الفاخر',
+      title: ' معرض الأثاث الفاخر',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
