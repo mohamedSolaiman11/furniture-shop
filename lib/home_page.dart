@@ -142,7 +142,7 @@ class HeroSection extends StatelessWidget {
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
                   ),
-                  child: const Text("تواصل عبر واتساب"),
+                  child: const Text("تواصل عبر واتساب الان"),
                 ),
               ],
             ),
