@@ -1,50 +1,57 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_localizations/flutter_localizations.dart';
-import 'package:furniture_store/home_page.dart';
-import 'package:furniture_store/theme.dart';
+import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'theme/app_theme.dart';
+import 'providers/store_provider.dart';
+import 'providers/settings_provider.dart';
+import 'screens/main_shell.dart';
+import 'supabase_config.dart';
 
-void main() {
-  runApp(const FurnitureApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  await Supabase.initialize(
+    url: SupabaseConfig.url,
+    anonKey: SupabaseConfig.anonKey,
+  );
+
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => StoreProvider()),
+        ChangeNotifierProvider(create: (_) => SettingsProvider()),
+      ],
+      child: const LuxeApp(),
+    ),
+  );
 }
 
-class FurnitureApp extends StatefulWidget {
-  const FurnitureApp({super.key});
-
-  // جعل الحالة عامة (Public) لتمكين الوصول إليها من ملفات أخرى
-  static FurnitureAppState of(BuildContext context) =>
-      context.findAncestorStateOfType<FurnitureAppState>()!;
+class LuxeApp extends StatelessWidget {
+  const LuxeApp({super.key});
 
   @override
-  State<FurnitureApp> createState() => FurnitureAppState();
-}
+  Widget build(BuildContext ctx) {
+    final settings = ctx.watch<SettingsProvider>();
+    
+    // إعدادات تجعل الموقع يبدو احترافياً في الانتقالات
+    final pageTransitionsTheme = PageTransitionsTheme(
+      builders: {
+        for (var platform in TargetPlatform.values)
+          platform: const FadeUpwardsPageTransitionsBuilder(),
+      },
+    );
 
-class FurnitureAppState extends State<FurnitureApp> {
-  ThemeMode _themeMode = ThemeMode.light;
-
-  void toggleTheme() {
-    setState(() {
-      _themeMode = _themeMode == ThemeMode.light ? ThemeMode.dark : ThemeMode.light;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
     return MaterialApp(
-      title: ' معرض الأثاث الفاخر',
+      title: settings.strings.appName,
+      theme: AppTheme.light.copyWith(pageTransitionsTheme: pageTransitionsTheme),
+      darkTheme: AppTheme.dark.copyWith(pageTransitionsTheme: pageTransitionsTheme),
+      themeMode: settings.themeMode,
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.lightTheme,
-      darkTheme: AppTheme.darkTheme,
-      themeMode: _themeMode,
-      localizationsDelegates: const [
-        GlobalMaterialLocalizations.delegate,
-        GlobalWidgetsLocalizations.delegate,
-        GlobalCupertinoLocalizations.delegate,
-      ],
-      supportedLocales: const [
-        Locale('ar', 'AE'),
-      ],
-      locale: const Locale('ar', 'AE'),
-      home: const HomePage(),
+      builder: (ctx, child) => Directionality(
+        textDirection: settings.textDirection,
+        child: child!,
+      ),
+      home: const MainShell(),
     );
   }
 }
