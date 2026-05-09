@@ -8,8 +8,15 @@ class StoreProvider extends ChangeNotifier {
   final _supabase = Supabase.instance.client;
 
   StoreProvider() {
+    _initAuthListener();
     fetchInitialData();
-    _loadLocalData(); // تحميل السلة والمفضلة المحفوظة
+    _loadLocalData(); 
+  }
+
+  void _initAuthListener() {
+    _supabase.auth.onAuthStateChange.listen((data) {
+      notifyListeners();
+    });
   }
 
   bool _isLoading = true;
@@ -21,7 +28,7 @@ class StoreProvider extends ChangeNotifier {
   
   String _searchQuery = '';
   String _selectedCategoryId = 'all';
-  double _maxPrice = 200000;
+  double _maxPrice = 150000;
 
   String get searchQuery => _searchQuery;
   String get selectedCategoryId => _selectedCategoryId;
@@ -49,26 +56,28 @@ class StoreProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ── Supabase Auth ─────────────────────────────────────────────────────────
+  // ── Auth ──────────────────────────────────────────────────────────────────
   bool get isOwner => _supabase.auth.currentSession != null;
 
   Future<bool> login(String email, String password) async {
     try {
       await _supabase.auth.signInWithPassword(email: email, password: password);
-      notifyListeners();
+      await fetchInitialData();
       return true;
     } catch (e) {
-      debugPrint("Login error: $e");
       return false;
     }
   }
 
   Future<void> logout() async {
-    await _supabase.auth.signOut();
-    notifyListeners();
+    try {
+      await _supabase.auth.signOut();
+      _currentTab = 0;
+      notifyListeners();
+    } catch (_) {}
   }
 
-  // ── Remote Data ───────────────────────────────────────────────────────────
+  // ── Data ──────────────────────────────────────────────────────────────────
   List<Category> _categories = [];
   List<Product> _products = [];
   List<Order> _orders = [];
@@ -97,7 +106,7 @@ class StoreProvider extends ChangeNotifier {
         _inquiries = (inqsData as List).map((e) => Inquiry.fromMap(e)).toList();
       }
     } catch (e) {
-      debugPrint("Error fetching data: $e");
+      debugPrint("Data Fetch Error: $e");
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -106,25 +115,49 @@ class StoreProvider extends ChangeNotifier {
 
   List<Product> get filteredProducts {
     return _products.where((p) {
-      final matchQ = _searchQuery.isEmpty || p.name.contains(_searchQuery) || p.material.contains(_searchQuery);
+      final matchQ = _searchQuery.isEmpty || 
+          p.name.toLowerCase().contains(_searchQuery.toLowerCase()) || 
+          p.material.toLowerCase().contains(_searchQuery.toLowerCase());
       final matchCat = _selectedCategoryId == 'all' || p.categoryId == _selectedCategoryId;
       final matchPrice = p.finalPrice <= _maxPrice;
       return matchQ && matchCat && matchPrice;
     }).toList();
   }
 
+  // ── Admin Stats Getters (داخل الكلاس الآن) ──────────────────────────────────
+  double get totalRevenue => _orders
+      .where((o) => o.status != OrderStatus.cancelled)
+      .fold(0, (s, o) => s + o.total);
+
+  int get totalOrders => _orders.length;
+
+  int get unreadInquiries => _inquiries.where((i) => !i.isRead).length;
+
+  List<dynamic> get topViewedProducts {
+    final list = List.from(_products);
+    list.sort((a, b) => b.viewCount.compareTo(a.viewCount));
+    return list.take(5).toList();
+  }
+
   // ── Actions ──────────────────────────────────────────────────────────────
   Future<void> submitInquiry({required String name, required String email, required String phone, required String message}) async {
-    final inq = Inquiry(id: '', name: name, email: email, phone: phone, message: message, createdAt: DateTime.now());
-    await _supabase.from('inquiries').insert(inq.toMap());
+    final inq = {'name': name, 'email': email, 'phone': phone, 'message': message};
+    await _supabase.from('inquiries').insert(inq);
     fetchInitialData();
   }
 
   Future<void> placeOrder({required String name, required String email, required String phone}) async {
     if (_cart.isEmpty) return;
     final orderId = DateTime.now().millisecondsSinceEpoch.toString().substring(5);
-    final order = Order(id: orderId, items: List.from(_cart), customerName: name, customerEmail: email, customerPhone: phone, createdAt: DateTime.now());
-    await _supabase.from('orders').insert(order.toMap());
+    final orderMap = {
+      'id': orderId,
+      'customer_name': name,
+      'customer_email': email,
+      'customer_phone': phone,
+      'items': _cart.map((i) => {'product': i.product.toMap(), 'quantity': i.quantity}).toList(),
+      'status': 'pending'
+    };
+    await _supabase.from('orders').insert(orderMap);
     _cart.clear();
     _saveLocalData();
     fetchInitialData();
@@ -146,10 +179,9 @@ class StoreProvider extends ChangeNotifier {
     } catch (_) {}
   }
 
-  // ── Cart & Wishlist (Persistent) ──────────────────────────────────────────
+  // ── Cart & Wishlist ───────────────────────────────────────────────────────
   List<CartItem> _cart = [];
   List<Product> _wishlist = [];
-
   List<CartItem> get cart => List.unmodifiable(_cart);
   List<Product> get wishlist => List.unmodifiable(_wishlist);
   int get cartCount => _cart.fold(0, (s, i) => s + i.quantity);
@@ -166,40 +198,35 @@ class StoreProvider extends ChangeNotifier {
     final i = _cart.indexWhere((item) => item.product.id == id);
     if (i != -1) { if (qty < 1) { _cart.removeAt(i); } else { _cart[i].quantity = qty; } _saveLocalData(); notifyListeners(); }
   }
-
   bool isWishlisted(String id) => _wishlist.any((p) => p.id == id);
   void toggleWishlist(Product p) {
     if (isWishlisted(p.id)) { _wishlist.removeWhere((w) => w.id == p.id); }
     else { _wishlist.add(p); }
-    _saveLocalData();
-    notifyListeners();
+    _saveLocalData(); notifyListeners();
   }
 
-  // ── Local Persistence ──
+  // ── Persistence ──
   Future<void> _saveLocalData() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('cart', jsonEncode(_cart.map((e) => {'product': e.product.toMap(), 'quantity': e.quantity}).toList()));
-    await prefs.setString('wishlist', jsonEncode(_wishlist.map((e) => e.toMap()).toList()));
+    await prefs.setString('luxe_cart', jsonEncode(_cart.map((e) => {'product': e.product.toMap(), 'quantity': e.quantity}).toList()));
+    await prefs.setString('luxe_wishlist', jsonEncode(_wishlist.map((e) => e.toMap()).toList()));
   }
 
   Future<void> _loadLocalData() async {
-    final prefs = await SharedPreferences.getInstance();
-    final cartStr = prefs.getString('cart');
-    final wishStr = prefs.getString('wishlist');
-    if (cartStr != null) {
-      _cart = (jsonDecode(cartStr) as List).map((e) => CartItem(product: Product.fromMap(e['product']), quantity: e['quantity'])).toList();
-    }
-    if (wishStr != null) {
-      _wishlist = (jsonDecode(wishStr) as List).map((e) => Product.fromMap(e)).toList();
-    }
-    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cartStr = prefs.getString('luxe_cart');
+      final wishStr = prefs.getString('luxe_wishlist');
+      if (cartStr != null) { _cart = (jsonDecode(cartStr) as List).map((e) => CartItem(product: Product.fromMap(e['product']), quantity: e['quantity'])).toList(); }
+      if (wishStr != null) { _wishlist = (jsonDecode(wishStr) as List).map((e) => Product.fromMap(e)).toList(); }
+      notifyListeners();
+    } catch (_) {}
   }
 
   // ── Admin Actions ─────────────────────────────────────────────────────────
   Future<void> addProduct(Product p) async { 
     var map = p.toMap(); map.remove('id');
-    await _supabase.from('products').insert(map); 
-    fetchInitialData(); 
+    await _supabase.from('products').insert(map); fetchInitialData(); 
   }
   Future<void> updateProduct(Product p) async { await _supabase.from('products').update(p.toMap()).eq('id', p.id); fetchInitialData(); }
   Future<void> deleteProduct(String id) async { await _supabase.from('products').delete().eq('id', id); fetchInitialData(); }
@@ -208,9 +235,4 @@ class StoreProvider extends ChangeNotifier {
   Future<void> deleteCategory(String id) async { await _supabase.from('categories').delete().eq('id', id); fetchInitialData(); }
   Future<void> updateOrderStatus(String id, OrderStatus s) async { await _supabase.from('orders').update({'status': s.name}).eq('id', id); fetchInitialData(); }
   Future<void> markInquiryRead(String id) async { await _supabase.from('inquiries').update({'is_read': true}).eq('id', id); fetchInitialData(); }
-
-  double get totalRevenue => _orders.where((o) => o.status != OrderStatus.cancelled.name).fold(0, (s, o) => s + o.total);
-  int get totalOrders => _orders.length;
-  int get unreadInquiries => _inquiries.where((i) => !i.isRead).length;
-  List<dynamic> get topViewedProducts => (List.from(_products)..sort((a, b) => b.viewCount.compareTo(a.viewCount))).take(5).toList();
 }

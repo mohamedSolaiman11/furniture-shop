@@ -29,7 +29,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(s.ownerDashboard.toUpperCase()),
+        title: Text(s.ownerDashboard.toUpperCase(), style: const TextStyle(letterSpacing: 2)),
         actions: [
           IconButton(
             icon: const Icon(Icons.exit_to_app_outlined),
@@ -70,21 +70,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         ),
       ),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 1400),
-          child: IndexedStack(
-            index: _tab,
-            children: const [
-              _StatsTab(),
-              _ProductsTab(),
-              _CategoriesTab(),
-              _OrdersTab(),
-              _InquiriesTab(),
-            ],
+      body: store.isLoading 
+        ? const Center(child: CircularProgressIndicator(color: AppColors.gold))
+        : Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1400),
+              child: IndexedStack(
+                index: _tab,
+                children: const [
+                  _StatsTab(),
+                  _ProductsTab(),
+                  _CategoriesTab(),
+                  _OrdersTab(),
+                  _InquiriesTab(),
+                ],
+              ),
+            ),
           ),
-        ),
-      ),
     );
   }
 }
@@ -298,7 +300,7 @@ class _ProductsTab extends StatelessWidget {
     showDialog(
       context: ctx,
       builder: (_) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
+        builder: (context, setSt) => AlertDialog(
           backgroundColor: theme.cardTheme.color,
           title: Text(existing == null ? s.addProduct.toUpperCase() : s.editProduct.toUpperCase(), style: const TextStyle(color: AppColors.gold, letterSpacing: 2, fontWeight: FontWeight.bold, fontSize: 16)),
           content: SizedBox(
@@ -324,7 +326,7 @@ class _ProductsTab extends StatelessWidget {
                   dropdownColor: theme.cardTheme.color,
                   decoration: InputDecoration(labelText: s.category),
                   items: store.categories.map((c) => DropdownMenuItem(value: c.id, child: Text('${c.icon} ${c.name}'))).toList(),
-                  onChanged: (v) => setState(() => selCat = v!),
+                  onChanged: (v) => setSt(() => selCat = v ?? ""),
                 ),
               ]),
             ),
@@ -393,6 +395,8 @@ class _CategoriesTab extends StatelessWidget {
     final theme = Theme.of(ctx);
     final nameCtrl = TextEditingController(text: existing?.name);
     final iconCtrl = TextEditingController(text: existing?.icon);
+    final imgCtrl = TextEditingController(text: existing?.imageUrl);
+    
     showDialog(
       context: ctx,
       builder: (_) => AlertDialog(
@@ -402,6 +406,8 @@ class _CategoriesTab extends StatelessWidget {
           TextField(controller: nameCtrl, decoration: InputDecoration(labelText: s.categoryName)),
           const SizedBox(height: 16),
           TextField(controller: iconCtrl, decoration: InputDecoration(labelText: s.emojiIcon)),
+          const SizedBox(height: 16),
+          TextField(controller: imgCtrl, decoration: const InputDecoration(labelText: "Image URL")),
         ]),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: Text(s.cancel, style: const TextStyle(color: AppColors.gold))),
@@ -409,8 +415,8 @@ class _CategoriesTab extends StatelessWidget {
             onPressed: () {
               if (nameCtrl.text.isEmpty) return;
               existing == null 
-                ? store.addCategory(nameCtrl.text, iconCtrl.text.isEmpty ? '🛋️' : iconCtrl.text)
-                : store.updateCategory(existing.id, nameCtrl.text, iconCtrl.text);
+                ? store.addCategory(nameCtrl.text, iconCtrl.text.isEmpty ? '🛋️' : iconCtrl.text, img: imgCtrl.text)
+                : store.updateCategory(existing.id, nameCtrl.text, iconCtrl.text, img: imgCtrl.text);
               Navigator.pop(ctx);
             },
             child: Text(existing == null ? s.add.toUpperCase() : s.save.toUpperCase()),
